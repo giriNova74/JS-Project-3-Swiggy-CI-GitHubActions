@@ -1,0 +1,56 @@
+name: íº€ Swiggy CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  deploy:
+    name: í´„ Build â†’ Scan â†’ Push â†’ Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: â¬‡ï¸ Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: í°³ Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: í´ Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USER }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: í¿—ï¸ Build and Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USER }}/swiggy-app:latest
+
+    - name: í´ Run Trivy Vulnerability Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ secrets.DOCKERHUB_USER }}/swiggy-app:latest'
+        format: 'table'
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+
+    - name: í´ Prepare SSH Access to EC2
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: íº€ Deploy to EC2 via SSH
+      run: |
+        ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          echo "í³¦ Pulling latest Docker image..."
+          docker rm -f swiggy-app || true
+          docker pull ${{ secrets.DOCKERHUB_USER }}/swiggy-app:latest
+          echo "íº€ Running Swiggy App on port 80 (mapped to container 3000)..."
+          docker run -d --name swiggy-app -p 80:3000 ${{ secrets.DOCKERHUB_USER }}/swiggy-app:latest
+        EOF
